@@ -47,7 +47,7 @@ if uploaded_nii:
     volume = nii_img.get_fdata(dtype=np.float32)
     st.write(f"Loaded volume shape: {volume.shape}, size: {volume.nbytes / (1024 ** 2):.1f} MB")
 
-    # Normalize
+    # Normalize input to [0, 1]
     vmin, vmax = np.percentile(volume, (0.5, 99.5))
     vol_norm = np.clip((volume - vmin) / (vmax - vmin + 1e-8), 0, 1)
 
@@ -81,10 +81,10 @@ if uploaded_nii:
         with torch.no_grad():
             out = model(inp).cpu().squeeze().numpy().astype(np.float32)
 
-        # Basic normalization
+        # --- Normalize output to [0, 1]
         out = (out - out.min()) / (out.max() - out.min() + 1e-8)
 
-        # Smooth intensity correction to match input stats (mean-std matching)
+        # --- Intensity matching (mean–std matching in normalized domain)
         mu_in, std_in = np.mean(slice_), np.std(slice_)
         mu_out, std_out = np.mean(out), np.std(out)
         if std_out > 1e-6:
@@ -92,8 +92,8 @@ if uploaded_nii:
         else:
             out = out * std_in + mu_in
 
-        # Clip to input CT range
-        out = np.clip(out, vmin, vmax)
+        # --- Clip to [0, 1] to preserve visualization contrast
+        out = np.clip(out, 0, 1)
 
         processed[:, :, i] = out.astype(np.float32)
 
@@ -109,7 +109,9 @@ if uploaded_nii:
     # ========================
     # Save + Visualization
     # ========================
-    out_img = nib.Nifti1Image(processed, affine=nii_img.affine)
+    # Convert back to CT intensity scale for saving
+    processed_ct = processed * (vmax - vmin) + vmin
+    out_img = nib.Nifti1Image(processed_ct, affine=nii_img.affine)
     out_path = os.path.join(tempfile.gettempdir(), "processed_output.nii")
     nib.save(out_img, out_path)
     gc.collect()
@@ -123,35 +125,29 @@ if uploaded_nii:
     # --- Layout: slider + box ---
     col1, col2 = st.columns([3, 1])
     with col1:
-        new_slider_val = st.slider(
+        slice_idx = st.slider(
             "Select slice index",
             0, n_slices - 1,
             value=st.session_state.slice_idx,
             key="slice_slider"
         )
     with col2:
-        new_box_val = st.number_input(
-            "Go to slice",
-            min_value=0,
-            max_value=n_slices - 1,
-            value=int(st.session_state.slice_idx),
-            key="slice_box"
-        )
+        st.write(f"Current: {int(slice_idx)}")
 
-    # --- Synchronize both ---
-    if new_slider_val != st.session_state.slice_idx:
-        st.session_state.slice_idx = new_slider_val
-    if new_box_val != st.session_state.slice_idx:
-        st.session_state.slice_idx = new_box_val
-
-    slice_idx = int(st.session_state.slice_idx)
+    # --- Update session state ---
+    st.session_state.slice_idx = slice_idx
 
     # --- Plot slices ---
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    ax[0].imshow(volume[:, :, slice_idx], cmap="gray", vmin=vmin, vmax=vmax)
-    ax[0].set_title(f"Original Slice {slice_idx}")
-    ax[1].imshow(processed[:, :, slice_idx], cmap="gray", vmin=vmin, vmax=vmax)
-    ax[1].set_title(f"Processed Slice {slice_idx}")
+    orig_slice = vol_norm[:, :, int(slice_idx)]
+    vmin_o, vmax_o = np.percentile(orig_slice, (2, 98))
+    ax[0].imshow(orig_slice, cmap="gray", vmin=vmin_o, vmax=vmax_o)
+    ax[0].set_title(f"Original Slice {int(slice_idx)}")
+    
+    proc_slice = processed[:, :, int(slice_idx)]
+    vmin_p, vmax_p = np.percentile(proc_slice, (2, 98))
+    ax[1].imshow(proc_slice, cmap="gray", vmin=vmin_p, vmax=vmax_p)
+    ax[1].set_title(f"Processed Slice {int(slice_idx)}")
     for a in ax:
         a.axis("off")
     st.pyplot(fig)
