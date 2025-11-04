@@ -1,5 +1,5 @@
 import os
-os.environ["STREAMLIT_SERVER_MAX_UPLOAD_SIZE"] = "1024"  # allow up to 1 GB uploads
+os.environ["STREAMLIT_SERVER_MAX_UPLOAD_SIZE"] = "1024"
 import streamlit as st
 import torch
 import nibabel as nib
@@ -81,56 +81,22 @@ if uploaded_nii:
         with torch.no_grad():
             out = model(inp).cpu().squeeze().numpy().astype(np.float32)
 
-        # --- Clip and normalize safely ---
-        p1, p99 = np.percentile(out, (1, 99))
-        out = np.clip(out, p1, p99)
+        # Basic normalization
         out = (out - out.min()) / (out.max() - out.min() + 1e-8)
 
-        # --- Detect black/blank output ---
-        if np.mean(out) < 0.05 or np.std(out) < 0.02:
-            inp_norm = (slice_ - np.min(slice_)) / (np.max(slice_) - np.min(slice_) + 1e-8)
-            out = np.clip(inp_norm ** 0.9, 0, 1)
-
-        # --- Polarity correction ---
-        if np.mean(out) < 0.4 and np.mean(slice_) > 0.6:
-            out = 1 - out
-
-        # --- Intensity remap to match input CT dynamic range ---
+        # Smooth intensity correction to match input stats (mean-std matching)
         mu_in, std_in = np.mean(slice_), np.std(slice_)
         mu_out, std_out = np.mean(out), np.std(out)
         if std_out > 1e-6:
             out = (out - mu_out) / std_out * std_in + mu_in
-        out = np.clip(out, vmin, vmax)
-        out_rescaled = out
-
-        inp_slice = volume[:, :, i].astype(np.float32)
-        th = np.percentile(inp_slice, 40)
-        mask = inp_slice > th
-        if not np.any(mask):
-            mask = np.ones_like(inp_slice, dtype=bool)
-
-        inp_flat = inp_slice[mask].ravel()
-        out_flat = out_rescaled[mask].ravel()
-        if np.std(inp_flat) > 1e-6 and np.std(out_flat) > 1e-6:
-            corr = np.corrcoef(inp_flat, out_flat)[0, 1]
         else:
-            corr = 0.0
+            out = out * std_in + mu_in
 
-        if corr < -0.15:
-            mid = (vmax + vmin) / 2.0
-            out_rescaled = 2 * mid - out_rescaled
-            out_rescaled = np.clip(out_rescaled, np.min(inp_slice), np.max(inp_slice))
+        # Clip to input CT range
+        out = np.clip(out, vmin, vmax)
 
-        mu_in, std_in = np.mean(inp_flat), np.std(inp_flat)
-        mu_out, std_out = np.mean(out_flat), np.std(out_flat) if np.std(out_flat) > 1e-6 else 1.0
-        out_rescaled = (out_rescaled - mu_out) / std_out * std_in + mu_in
-        out_rescaled = np.clip(out_rescaled, vmin, vmax)
+        processed[:, :, i] = out.astype(np.float32)
 
-        out_norm = (out_rescaled - vmin) / (vmax - vmin + 1e-8)
-        out_norm = np.clip(1.05 * out_norm ** 0.95, 0, 1)
-        out_final = out_norm * (vmax - vmin) + vmin
-
-        processed[:, :, i] = out_final.astype(np.float32)
         if i % 5 == 0:
             progress_bar.progress((i + 1) / n_slices)
 
