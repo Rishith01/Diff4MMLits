@@ -67,14 +67,14 @@ BATCH_SIZE = 16
 LR = 1e-4
 FORCE_SIZE = (256, 256)
 USE_ALL_GPUS = True
-USE_EMA = False
+USE_EMA = True
 EMA_DECAY = 0.9999
 EMA_STEP = 10
 MIXED_PRECISION = True
 
 # loss weights (tweak if needed)
 W_FULL_MAIN = 1.0
-W_MASK_MAIN = 1.0
+W_MASK_MAIN = 0.0
 W_FULL_RECON = 4.0
 W_MASK_RECON = 1.0
 W_BG = 1.0
@@ -131,7 +131,7 @@ def visualize_pre_and_inpaint(
 # ------------------------------------------------------------
 # Perceptual (VGG) setup (pretrained)
 # ------------------------------------------------------------
-use_perceptual = True
+use_perceptual = False
 vgg = None
 if use_perceptual:
     try:
@@ -296,26 +296,80 @@ def main():
     # ===============================
     # Reduce dataset size per epoch
     # ===============================
-    MAX_SLICES_PER_EPOCH = 5000   # you can set 5000, 10000, etc.
-    if len(entries) > MAX_SLICES_PER_EPOCH:
-        np.random.seed(epoch if 'epoch' in locals() else 42)
-        entries = list(np.random.choice(entries, MAX_SLICES_PER_EPOCH, replace=False))
-        print(f"[INFO] Using subset: {len(entries)} slices this epoch.")
-    # always use the FIRST 2 slices, deterministic
-    # entries = entries[:MAX_SLICES_PER_EPOCH]
-    # print(f"[INFO] Using EXACTLY {len(entries)} slices per epoch.")
+    # MAX_SLICES_PER_EPOCH = 5000   # you can set 5000, 10000, etc.
+    # if len(entries) > MAX_SLICES_PER_EPOCH:
+    #     np.random.seed(epoch if 'epoch' in locals() else 42)
+    #     entries = list(np.random.choice(entries, MAX_SLICES_PER_EPOCH, replace=False))
+    #     print(f"[INFO] Using subset: {len(entries)} slices this epoch.")
+    
+    # # Dataset & DataLoader
+    # ds = CTNPZDataset(entries=entries,
+    #                   preprocess_fn=preprocess_volume_soft,
+    #                   augment_fn=augment_medical,
+    #                   aug_prob=0.2,
+    #                   force_size=FORCE_SIZE)
+    # dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
+
+    # ------------------------------------------------------
+    # VISUALISE RANDOM SUBSET OF THE COMPLETE DATASET
+    # (BEFORE TRAINING)
+    # ------------------------------------------------------
+    def visualize_paired_dataset(entries, out_dir="vis_full_dataset", max_samples=30):
+        out_dir = Path(out_dir)
+        out_dir.mkdir(exist_ok=True)
+
+        sample_entries = random.sample(entries, min(max_samples, len(entries)))
+
+        for idx, entry in enumerate(sample_entries):
+
+            inpaint_path = entry["inpaint"]
+            orig_path    = entry["orig"]
+            mask_path    = entry["mask"]
+            zidx         = entry["slice"]
+
+            # --- Load ---
+            orig_npz = np.load(orig_path)
+            img = orig_npz["image"][zidx].astype(np.float32)
+
+            inpaint_npz = np.load(inpaint_path)
+            img_inp = inpaint_npz["inpainted"][zidx].astype(np.float32)
+
+            mask_npz = np.load(mask_path)
+            mask = mask_npz["mask"][zidx].astype(np.float32)
+
+            # --- Clip for visualization ---
+            img_vis = np.clip(img, -200, 300)
+            img_inp_vis = np.clip(img_inp, -200, 300)
+
+            # --- Plot ---
+            fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+
+            axs[0].imshow(img_vis, cmap="gray")
+            axs[0].set_title("Ground Truth Slice")
+            axs[0].axis("off")
+
+            axs[1].imshow(mask, cmap="hot")
+            axs[1].set_title("Tumor Mask")
+            axs[1].axis("off")
+
+            axs[2].imshow(img_inp_vis, cmap="gray")
+            axs[2].set_title("Inpainted Slice")
+            axs[2].axis("off")
+
+            plt.tight_layout()
+            save_path = out_dir / f"paired_{idx}.png"
+            plt.savefig(save_path, dpi=130)
+            plt.close()
+
+        print(f"[VIS] Saved {len(sample_entries)} paired dataset previews → {out_dir}")
 
 
-    # Dataset & DataLoader
-    ds = CTNPZDataset(entries=entries,
-                      preprocess_fn=preprocess_volume_soft,
-                      augment_fn=augment_medical,
-                      aug_prob=0.2,
-                      force_size=FORCE_SIZE)
-    dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
+    # ---- Call it immediately ----
+    # visualize_paired_dataset(entries, out_dir="vis_full_dataset_pretrain", max_samples=30)
+
 
     # Model + diffusion + optimizer + scheduler
-    model = EnhancedUNet(in_ch=1, cond_ch=3, base_ch=48, ch_mult=(1,2,4), num_res_blocks=2, time_dim=256).to(DEVICE)
+    model = EnhancedUNet(in_ch=1, cond_ch=2, base_ch=48, ch_mult=(1,2,4), num_res_blocks=2, time_dim=256).to(DEVICE)
     model = setup_model_for_device(model)
     diffusion = Diffusion(timesteps=TIMESTEPS, device=DEVICE, use_cosine=True)
 
@@ -337,7 +391,36 @@ def main():
     all_tumor_mses = []
     all_full_mses = []
 
+    all_entries = entries  
+
     for epoch in range(start_epoch, EPOCHS):
+
+        MAX_SLICES_PER_EPOCH = 5000
+
+        if len(all_entries) > MAX_SLICES_PER_EPOCH:
+            # deterministic seed per epoch
+            np.random.seed(epoch)
+
+            # choose indices, not entries directly
+            sel_idx = np.random.choice(len(all_entries), MAX_SLICES_PER_EPOCH, replace=False)
+            entries_epoch = [all_entries[i] for i in sel_idx]
+
+            print(f"[INFO] Using subset: {len(entries_epoch)} slices this epoch.")
+        else:
+            entries_epoch = all_entries
+
+        # Dataset & DataLoader
+        ds = CTNPZDataset(
+            entries=entries_epoch,
+            preprocess_fn=preprocess_volume_soft,
+            clip_min=-200,
+            clip_max=300,
+            force_size=FORCE_SIZE
+        )
+
+
+        dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4,
+                        pin_memory=True, drop_last=True)
         model.train()
         epoch_loss_sum = 0.0
         epoch_steps = 0
@@ -346,22 +429,28 @@ def main():
         ssim_epoch = []
         tumor_mse_epoch = []
         full_mse_epoch = []
-        scheduler.step()
 
         pbar = tqdm(dl, desc=f"Epoch {epoch+1}/{EPOCHS}", leave=False)
         for batch in pbar:
+            # unpack now returns 5 elements
             healthy_t, target_t, tumor_mask_t, liver_mask_t = batch
+            clean_target_t = target_t.clone()  # keep a clean copy for supervision
 
             # ---- FIX: force deterministic same spatial size ---
             healthy_t = F.interpolate(healthy_t, size=FORCE_SIZE, mode='bilinear', align_corners=False)
+            # target_t is already clean and preprocessed; keep it as-is but also ensure size
             target_t  = F.interpolate(target_t,  size=FORCE_SIZE, mode='bilinear', align_corners=False)
             tumor_mask_t = F.interpolate(tumor_mask_t, size=FORCE_SIZE, mode='nearest')
             liver_mask_t = F.interpolate(liver_mask_t, size=FORCE_SIZE, mode='nearest')
+            clean_target_t = F.interpolate(clean_target_t, size=FORCE_SIZE, mode='bilinear', align_corners=False)
 
             healthy_t = healthy_t.to(DEVICE)
+            # Use the CLEAN target for supervision / visualization
             target_t  = target_t.to(DEVICE)
+            clean_target_t = clean_target_t.to(DEVICE)
             tumor_mask_t = tumor_mask_t.to(DEVICE)
             liver_mask_t = liver_mask_t.to(DEVICE)
+
 
             # determine batch size (use target_t to be safe)
             B = int(target_t.shape[0])
@@ -392,13 +481,17 @@ def main():
             #     healthy_cond = target_t.detach()
             # if random.random() < P_DROP_LIVER_MASK:
             #     liver_mask_cond = torch.zeros_like(liver_mask_t)
-            cond = torch.cat([healthy_cond, liver_mask_cond, tumor_mask_t], dim=1)
+            cond = torch.cat([healthy_cond, liver_mask_cond], dim=1)
+
 
 
             drop_cond = (random.random() < 0.2)
 
             with torch.cuda.amp.autocast(enabled=MIXED_PRECISION):
-                core_loss, pred, x0_hat, target_core = diffusion.p_losses(model, target_t, cond, t, use_v=True, drop_cond=drop_cond)
+                                # use clean_target_t as x_start (no augmentation)
+                core_loss, pred, x0_hat, target_core = diffusion.p_losses(
+                    model, clean_target_t, cond, t, use_v=True, drop_cond=drop_cond
+                )
 
                 # clamp reconstruction
                 x0_hat = torch.clamp(x0_hat, -1.0, 1.0)
@@ -463,7 +556,7 @@ def main():
 
 
             pbar.set_postfix(loss=f"{(epoch_loss_sum/epoch_steps):.4f}", lr=f"{scheduler.get_last_lr()[0]:.2e}")
-
+        scheduler.step()
         
         # epoch summaries
         avg_loss = epoch_loss_sum / max(1, epoch_steps)
@@ -495,11 +588,27 @@ def main():
 
         torch.save(ckpt, CKPT_DIR / "latest_full.pt")
         save_checkpoint_epoch(model, opt, epoch, CKPT_DIR)  # saves epoched model file
+        os.makedirs(VIS_DIR, exist_ok=True)
 
         try:
-            visualize_sample(diffusion, model, healthy_t, target_t, tumor_mask_t, liver_mask_t,
-                 pass_n=epoch, stage="mid", device=DEVICE, force_size=FORCE_SIZE,
-                 vis_dir=VIS_DIR)
+            # pick visualisation model
+            vis_model = ema.model if (ema is not None) else model
+
+            visualize_sample(
+                diffusion,
+                vis_model,
+                healthy_t,
+                target_t,
+                tumor_mask_t,
+                liver_mask_t,
+                pass_n=epoch,
+                stage="mid",
+                device=DEVICE,
+                force_size=FORCE_SIZE,
+                timesteps=300,              # <-- use more steps for clean sample
+                vis_dir=VIS_DIR
+            )
+
 
         except Exception as e:
             print("Visualization failed:", e)
