@@ -1,4 +1,21 @@
 # 🧠 Conditional Diffusion for Liver Tumor Simulation & Inpainting (CT Scans)
+
+---
+
+## 🖼️ Project Poster
+
+Here is the **official project poster** presented for the IE643 course:
+
+🔗 **[View Project Poster](https://drive.google.com/file/d/1aTinOa_6J-I0fixUtT2AdfFnkYFifthE/view?usp=drive_link)**
+
+This poster summarizes:
+- ✅ Problem formulation
+- ✅ Diffusion pipeline
+- ✅ Model architecture
+- ✅ Results & future scope
+
+---
+
 ### 📘 Course Project – **IE643: Deep Learning for Imaging Systems**
 
 This repository contains our **IE643 course project**, where we implement a **Conditional Denoising Diffusion Probabilistic Model (DDPM)** for **realistic liver tumor synthesis and inpainting in CT scans** using:
@@ -26,6 +43,20 @@ This enables:
 
 ---
 
+## 🎥 Final Output Demo (Model Inference)
+
+Watch the **final diffusion + tumor inpainting output** in action here:
+
+🔗 **[View Final Output Demo Video](https://drive.google.com/file/d/1Gbw1ysiOZ5DGhMej92PwXDxwA4pnbTHU/view?usp=drive_link)**
+
+This demo showcases:
+- ✅ Interactive selection between **conditional and unconditional tumor synthesis**
+- ✅ **Slice-wise visualization** of the generated CT outputs
+- ✅ Seamless **web-based inference demo**
+- ✅ Final **reconstructed CT scan outputs**
+
+---
+
 ## 📌 Key Features
 - ✅ ε-parameterized DDPM training
 - ✅ Conditional UNet architecture
@@ -37,7 +68,6 @@ This enables:
 - ✅ Mask-preserving segmentation workflow
 - ✅ Full visualization of noising & denoising
   
-Drive link for videos and presentation at different stages - https://drive.google.com/drive/folders/1yqMuM8hnUJt6Mk4-Gd_2J0DVcAuWSnUY?usp=sharing
 ---
 
 ## 🧬 Pipeline Overview
