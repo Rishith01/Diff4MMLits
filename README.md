@@ -24,7 +24,6 @@ This enables:
 
 <img width="3151" height="816" alt="diffusion_4panel_slice_433" src="https://github.com/user-attachments/assets/d335632a-eb7f-48f8-afb8-15dd49128818" />
 
-
 ---
 
 ## 📌 Key Features
@@ -37,7 +36,8 @@ This enables:
 - ✅ CT-aware Preprocessing Pipeline
 - ✅ Mask-preserving segmentation workflow
 - ✅ Full visualization of noising & denoising
-
+  
+Drive link for videos and presentation at different stages - https://drive.google.com/drive/folders/1yqMuM8hnUJt6Mk4-Gd_2J0DVcAuWSnUY?usp=sharing
 ---
 
 ## 🧬 Pipeline Overview
